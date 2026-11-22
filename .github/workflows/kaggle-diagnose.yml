@@ -1,0 +1,30 @@
+name: Diagnose existing Kaggle pilot (read only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main' && github.repository == 'xxammaxx/mindloop-weightspace-lab'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: KAGGLE_API_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned CLI and run diagnostics tests without secrets
+        run: |
+          python3 -m venv "$RUNNER_TEMP/kaggle-cli"
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5' 'six==1.17.0' 'numpy==2.2.6'
+          "$RUNNER_TEMP/kaggle-cli/bin/kaggle" kernels logs --help
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m unittest discover -s weightspace_ci/tests -v
+      - name: Read existing failed notebook version 1 only
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          export PATH="$RUNNER_TEMP/kaggle-cli/bin:$PATH"
+          python -c 'from weightspace_ci.dispatch import kaggle_owner, diagnose_kernel; diagnose_kernel(kaggle_owner()+"/mindloop-wsp-pilot-45041540858/1")'
