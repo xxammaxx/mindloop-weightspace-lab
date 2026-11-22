@@ -15,7 +15,7 @@ jobs:
   pilot:
     if: github.ref == 'refs/heads/main' && github.repository == 'xxammaxx/mindloop-weightspace-lab' && github.run_attempt == 1
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 70
     environment: KAGGLE_API_TOKEN
     steps:
       - uses: actions/checkout@v4
@@ -27,18 +27,41 @@ jobs:
           "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5' 'six==1.17.0' 'numpy==2.2.6'
           "$RUNNER_TEMP/kaggle-cli/bin/kaggle" --version
           "$RUNNER_TEMP/kaggle-cli/bin/kaggle" kernels push --help
+          "$RUNNER_TEMP/kaggle-cli/bin/kaggle" datasets create --help
           "$RUNNER_TEMP/kaggle-cli/bin/python" -m unittest discover -s weightspace_ci/tests -v
-      - name: Check budget, dispatch one private GPU job, retrieve validated metrics
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download public binary wheels for Python 3.13 without secrets
+        run: |
+          mkdir "$RUNNER_TEMP/wsp-offline"
+          python -m pip download --disable-pip-version-check --only-binary=:all: --dest "$RUNNER_TEMP/wsp-offline" 'transformers==5.12.0' 'numpy==2.2.6'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download Python 3.12 wheels and pinned public model without secrets
+        run: |
+          python -m pip download --disable-pip-version-check --only-binary=:all: --dest "$RUNNER_TEMP/wsp-offline" 'transformers==5.12.0' 'numpy==2.2.6'
+          python -m pip install --disable-pip-version-check --no-index --find-links "$RUNNER_TEMP/wsp-offline" 'huggingface_hub'
+          python -m weightspace_ci.prepare_bundle "$RUNNER_TEMP/wsp-offline"
+          mkdir -p pilot-results
+          cp "$RUNNER_TEMP/wsp-offline/wsp-input-manifest.json" pilot-results/input-manifest.json
+      - name: Upload private offline inputs, qualify CPU, then check budget and run GPU
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
           export PATH="$RUNNER_TEMP/kaggle-cli/bin:$PATH"
-          python -m weightspace_ci.dispatch
+          export WSP_BUNDLE_DIR="$RUNNER_TEMP/wsp-offline"
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m weightspace_ci.dispatch
       - name: Upload sanitized evidence only
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wsp-pilot-${{ github.run_id }}
-          path: pilot-results/metrics.json
-          if-no-files-found: error
+          path: |
+            pilot-results/input-manifest.json
+            pilot-results/qualification.json
+            pilot-results/metrics.json
+          if-no-files-found: warn
           retention-days: 30
