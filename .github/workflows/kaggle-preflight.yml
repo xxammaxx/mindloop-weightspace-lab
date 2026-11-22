@@ -32,7 +32,21 @@ jobs:
             exit 1
           fi
           if ! "$RUNNER_TEMP/kaggle-cli/bin/kaggle" quota --format json > "$RUNNER_TEMP/quota.json" 2> "$RUNNER_TEMP/quota.err"; then
-            echo 'BLOCKED: authenticated Kaggle quota request failed. No GPU job dispatched.'
+            # Never print raw CLI output: it may include credentials or account data.
+            if grep -qiE '401|unauthorized|unauthenticated|authentication required|invalid (api )?token|invalid credentials' "$RUNNER_TEMP/quota.err" "$RUNNER_TEMP/quota.json"; then
+              echo 'BLOCKED: AUTH_REJECTED (authentication failed).'
+            elif grep -qiE '403|forbidden|permission denied' "$RUNNER_TEMP/quota.err" "$RUNNER_TEMP/quota.json"; then
+              echo 'BLOCKED: ACCESS_DENIED (Kaggle refused permission).'
+            elif grep -qiE 'unrecognized arguments|invalid choice' "$RUNNER_TEMP/quota.err" "$RUNNER_TEMP/quota.json"; then
+              echo 'BLOCKED: CLI_ARGUMENT_ERROR.'
+            elif grep -qiE 'connectionerror|connection refused|max retries exceeded|certificate verify failed|timed out' "$RUNNER_TEMP/quota.err" "$RUNNER_TEMP/quota.json"; then
+              echo 'BLOCKED: CONNECTION_ERROR.'
+            elif grep -qiE 'not enough values to unpack' "$RUNNER_TEMP/quota.err" "$RUNNER_TEMP/quota.json"; then
+              echo 'BLOCKED: SDK_PARSE_ERROR.'
+            else
+              echo 'BLOCKED: UNCLASSIFIED (CLI or API error).'
+            fi
+            echo 'No GPU job dispatched.'
             exit 1
           fi
           "$RUNNER_TEMP/kaggle-cli/bin/python" -c 'import json,sys; data=json.load(open(sys.argv[1])); assert isinstance(data,list) and data and all(isinstance(row,dict) and "resource" in row and "remaining" in row for row in data), "Unrecognized quota response"; print("PASS: authenticated quota response received; GPU not launched.")' "$RUNNER_TEMP/quota.json"
