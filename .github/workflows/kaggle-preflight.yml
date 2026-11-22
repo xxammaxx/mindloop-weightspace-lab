@@ -20,7 +20,9 @@ jobs:
       - name: Install pinned official CLI without credentials
         run: |
           python3 -m venv "$RUNNER_TEMP/kaggle-cli"
-          "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5'
+          # Kaggle 2.2.5 imports six without declaring it; python-dateutil >=4 no longer supplies it.
+          # Upstream fix: Kaggle/kaggle-cli#1239. Keep the explicit pin until upgrading.
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5' 'six==1.17.0'
       - name: Smoke test CLI startup without credentials
         run: |
           "$RUNNER_TEMP/kaggle-cli/bin/kaggle" --version
