@@ -9,14 +9,14 @@ import subprocess
 import sys
 import time
 
-import numpy as np
-
 MODEL = "Qwen/Qwen3.5-0.8B"
 REVISION = "2fc06364715b967f1860aea9cf38778875588b17"
 WEIGHTS = "model.safetensors-00001-of-00001.safetensors"
 WEIGHT_SHA = "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696"
 RUN_ID = "__RUN_ID__"
 SOURCE_SHA = "__SOURCE_SHA__"
+BUNDLE_SHA = "__BUNDLE_SHA__"
+MODE = "__EXEC_MODE__"
 SEED = 1701
 LABELS = ('A', 'B', 'C', 'D')
 BASE = ('Choose the NEXT action for a simulated file task. A=read existing file, '
@@ -61,6 +61,7 @@ HOLDOUT = [(s, y) for y, rows in enumerate((
 
 def factor_edit(h, residual, *, ridge=1.0, rank=2):
     """Solve ridge regression in sample space and truncate by SVD; W=B@A."""
+    import numpy as np
     h = np.asarray(h, dtype=np.float64)
     residual = np.asarray(residual, dtype=np.float64)
     w = (h.T @ np.linalg.solve(h @ h.T + ridge*np.eye(len(h)), residual)).T
@@ -69,6 +70,7 @@ def factor_edit(h, residual, *, ridge=1.0, rank=2):
 
 
 def placebo(a, b):
+    import numpy as np
     rng = np.random.default_rng(SEED)
     w = rng.normal(size=b.shape) @ rng.normal(size=a.shape)
     return w * (np.linalg.norm(b @ a) / np.linalg.norm(w))
@@ -89,20 +91,26 @@ def sha_file(path):
 
 def run():
     start = time.monotonic()
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'transformers==5.12.0'], check=True, timeout=360)
+    if MODE not in ('cpu','gpu'):
+        raise RuntimeError('Unexpected execution mode')
+    snapshot = bootstrap_offline(BUNDLE_SHA)  # prepended by dispatch.py
+    import numpy as np
     import torch
     import transformers
-    from huggingface_hub import snapshot_download
     from transformers import AutoTokenizer, Qwen3_5ForConditionalGeneration
 
-    if not torch.cuda.is_available() or 'T4' not in torch.cuda.get_device_name(0):
+    if transformers.__version__ != '5.12.0' or np.__version__ != '2.2.6':
+        raise RuntimeError('Unexpected offline dependency versions')
+    if MODE == 'gpu' and (not torch.cuda.is_available() or 'T4' not in torch.cuda.get_device_name(0)):
         raise RuntimeError('Required free T4 GPU unavailable')
+    device = 'cpu' if MODE == 'cpu' else 'cuda:0'
+    if MODE == 'cpu':
+        torch.set_num_threads(2)
     torch.manual_seed(SEED)
-    snapshot = Path(snapshot_download(MODEL, revision=REVISION, allow_patterns=['*.json', '*.safetensors', '*.jinja', '*.txt', 'LICENSE'], token=False))
     if sha_file(snapshot / WEIGHTS) != WEIGHT_SHA:
         raise RuntimeError('Model checksum differs')
     tokenizer = AutoTokenizer.from_pretrained(snapshot, trust_remote_code=False, local_files_only=True)
-    model = Qwen3_5ForConditionalGeneration.from_pretrained(snapshot, dtype=torch.float32, trust_remote_code=False, local_files_only=True).eval().to('cuda:0')
+    model = Qwen3_5ForConditionalGeneration.from_pretrained(snapshot, dtype=torch.float32, trust_remote_code=False, local_files_only=True).eval().to(device)
     model.requires_grad_(False)
     label_ids = [tokenizer.encode(x, add_special_tokens=False) for x in LABELS]
     if any(len(x) != 1 for x in label_ids) or len({x[0] for x in label_ids}) != 4:
@@ -116,7 +124,7 @@ def run():
         with torch.inference_mode():
             for task, _ in rows:
                 captured.clear()
-                encoded = tokenizer(prompt + task + '\nAnswer:', return_tensors='pt').to('cuda:0')
+                encoded = tokenizer(prompt + task + '\nAnswer:', return_tensors='pt').to(device)
                 out = model(**encoded, logits_to_keep=1, use_cache=False)
                 if len(captured) != 1:
                     raise RuntimeError('Output head hook did not capture unique activation')
@@ -124,6 +132,17 @@ def run():
         return np.array(hidden), np.array(logits)
 
     try:
+        if MODE == 'cpu':
+            h, logits = extract(DEV[:1], BASE)
+            if h.ndim != 2 or h.shape[0] != 1 or h.shape[1] <= 0 or logits.shape != (1,4) or not np.isfinite(h).all() or not np.isfinite(logits).all():
+                raise RuntimeError('Offline model forward failed')
+            report = {'schema':1,'experiment':'WSP-PILOT-001','run_id':RUN_ID,'source_sha':SOURCE_SHA,
+                      'bundle_sha256':BUNDLE_SHA,'model':MODEL,'revision':REVISION,'weights_sha256':WEIGHT_SHA,
+                      'transformers':transformers.__version__,'device':'cpu','torch':torch.__version__,
+                      'forward_pass':True,'labels':4,'hidden_size':int(h.shape[1])}
+            Path('/kaggle/working/qualification.json').write_text(json.dumps(report,allow_nan=False))
+            print('Offline CPU qualification completed.',flush=True)
+            return
         h_dev, logits_dev = extract(DEV, BASE)
         # Target correct label ahead of other labels by a fixed margin (2 logits).
         target = np.repeat((logits_dev.max(axis=1)-2)[:, None], 4, axis=1)
@@ -142,6 +161,7 @@ def run():
         residual = float(np.max(np.abs(h@a.T@b.T - h@(b@a).T)))
         score['delta_rank'] = int(np.linalg.matrix_rank(b@a))
         report = {'schema': 1, 'experiment': 'WSP-PILOT-001', 'run_id': RUN_ID, 'source_sha': SOURCE_SHA,
+                  'bundle_sha256': BUNDLE_SHA,
                   'model': MODEL, 'revision': REVISION, 'weights_sha256': WEIGHT_SHA,
                   'data_sha256': hashlib.sha256(json.dumps([DEV,HOLDOUT], ensure_ascii=False).encode()).hexdigest(),
                   'device': torch.cuda.get_device_name(0), 'torch': torch.__version__, 'transformers': transformers.__version__,
