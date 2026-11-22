@@ -62,6 +62,45 @@ def run_cli(*args):
     return r.stdout
 
 
+def summarize_kernel_log(raw):
+    """Return only enumerated categories and bounded source line numbers, never text from logs."""
+    patterns = {
+        'dependency_install': r'No matching distribution found|Could not find a version that satisfies|ResolutionImpossible|pip.*returned non-zero|subprocess\.CalledProcessError',
+        'dependency_import': r'ImportError:|cannot import name|undefined symbol|numpy\.dtype size changed',
+        'missing_module': r'ModuleNotFoundError:',
+        'model_access': r'RepositoryNotFoundError|GatedRepoError|RevisionNotFoundError|EntryNotFoundError|(?:401|403) Client Error',
+        'network': r'ConnectionError|Connection refused|Temporary failure in name resolution|ReadTimeout|Network is unreachable|Max retries exceeded',
+        'out_of_memory': r'CUDA out of memory|OutOfMemoryError|Cannot allocate memory',
+        'gpu_unavailable': r'Required free T4 GPU unavailable|CUDA driver version is insufficient|CUDA error: no kernel image',
+        'model_checksum': r'Model checksum differs|FileNotFoundError:.*safetensors',
+        'model_runtime': r'AttributeError:|TypeError:|ValueError:|NotImplementedError:|CUDA error:',
+        'timeout': r'TimeoutExpired|exceeded.*time limit',
+        'tokenization': r'Label tokenization incompatible',
+        'hook': r'Output head hook did not capture unique activation',
+        'nonfinite': r'Nonfinite edit',
+        'process_killed': r'Killed|exit code 137|SIGKILL',
+    }
+    categories = sorted(k for k, pattern in patterns.items() if re.search(pattern, raw, re.I))
+    lines = {int(n) for n in re.findall(r'File "[^"\n]*\bpilot\.py", line ([1-9]\d{0,3})\b', raw)}
+    return {'categories': categories or ['unknown'], 'pilot_lines': sorted(lines)}
+
+
+def kaggle_owner():
+    users = re.findall(r'^- username: ([a-zA-Z0-9_-]+)$', run_cli('config','view'), re.M)
+    if len(users)!=1 or users[0].lower()=='none':
+        raise RuntimeError('Could not identify Kaggle account')
+    return users[0]
+
+
+def diagnose_kernel(kernel):
+    try:
+        raw = run_cli('kernels','logs',kernel)
+    except (RuntimeError, subprocess.TimeoutExpired):
+        print('Kaggle diagnostic: log retrieval unavailable', flush=True)
+        return
+    print('Kaggle diagnostic:', json.dumps(summarize_kernel_log(raw)), flush=True)
+
+
 def weekly_budget(run_id):
     # Count all dispatch attempts conservatively, even unsuccessful ones, in a rolling seven days.
     since = (dt.datetime.now(dt.timezone.utc)-dt.timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -82,12 +121,8 @@ def main():
         raise RuntimeError('Missing token or weekly budget blocked')
     if not quota_ok(json.loads(run_cli('quota','--format','json'))):
         raise RuntimeError('No verified free GPU quota >= 1.10 hours; no dispatch')
-    config=run_cli('config','view')
-    users=re.findall(r'^- username: ([a-zA-Z0-9_-]+)$',config,re.M)
-    if len(users)!=1 or users[0].lower()=='none':
-        raise RuntimeError('Could not identify Kaggle account; no dispatch')
     slug='mindloop-wsp-pilot-'+run_id
-    kernel=users[0]+'/'+slug
+    kernel=kaggle_owner()+'/'+slug
     with tempfile.TemporaryDirectory() as tmp:
         folder=Path(tmp)/'kernel'; folder.mkdir()
         source=Path(__file__).with_name('pilot.py').read_text().replace('__RUN_ID__',run_id).replace('__SOURCE_SHA__',sha)
@@ -109,6 +144,8 @@ def main():
             if status=='COMPLETE':
                 break
             if status not in ('QUEUED','RUNNING'):
+                if status == 'ERROR':
+                    diagnose_kernel(kernel)
                 raise RuntimeError('Kaggle pilot not successful; no retry')
             time.sleep(20)
         else:
