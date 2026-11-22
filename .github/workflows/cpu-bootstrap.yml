@@ -1,0 +1,25 @@
+name: CPU bootstrap tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'weightspace_ci/**'
+      - '.github/workflows/cpu-bootstrap.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpu-bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s weightspace_ci/tests -v
