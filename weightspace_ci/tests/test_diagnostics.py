@@ -12,8 +12,13 @@ class DiagnosticTests(unittest.TestCase):
     def test_classifies_runtime_and_package_failures(self):
         raw = 'ERROR: No matching distribution found for transformers==5.12.0\nsubprocess.CalledProcessError: exit status 1\nModuleNotFoundError: No module named xyz\nRuntimeError: CUDA out of memory'
         result = getattr(dispatch, 'summarize_kernel_log', lambda _: {})(raw)
-        self.assertEqual(result, {'categories': ['dependency_install', 'missing_module', 'out_of_memory'], 'pilot_lines': []})
+        self.assertEqual(result, {'categories': ['dependency_install', 'missing_module', 'out_of_memory', 'package_not_found'], 'pilot_lines': []})
 
     def test_unknown_output_does_not_publish_raw_text(self):
         result = getattr(dispatch, 'summarize_kernel_log', lambda _: {} )('username=private; api_token=xyz; arbitrary failure')
         self.assertEqual(result, {'categories': ['unknown'], 'pilot_lines': []})
+
+    def test_distinguishes_dns_from_missing_package(self):
+        raw = 'WARNING: Retrying after connection broken by NewConnectionError: [Errno -3] Temporary failure in name resolution\nERROR: No matching distribution found for transformers==5.12.0'
+        result = dispatch.summarize_kernel_log(raw)
+        self.assertEqual(result['categories'], ['dependency_install', 'network', 'network_dns', 'package_not_found'])
