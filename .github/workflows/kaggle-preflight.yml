@@ -1,0 +1,38 @@
+name: Kaggle access preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/main' && github.repository == 'xxammaxx/mindloop-weightspace-lab'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: KAGGLE_API_TOKEN
+    steps:
+      - name: Install pinned official CLI without credentials
+        run: |
+          python3 -m venv "$RUNNER_TEMP/kaggle-cli"
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5'
+      - name: Check authenticated accelerator quota without disclosing credentials
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -eu
+          if [ -z "$KAGGLE_API_TOKEN" ]; then
+            echo 'BLOCKED: KAGGLE_API_TOKEN missing in the environment.'
+            exit 1
+          fi
+          if ! "$RUNNER_TEMP/kaggle-cli/bin/kaggle" quota --format json > "$RUNNER_TEMP/quota.json" 2> "$RUNNER_TEMP/quota.err"; then
+            echo 'BLOCKED: authenticated Kaggle quota request failed. No GPU job dispatched.'
+            exit 1
+          fi
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -c 'import json,sys; data=json.load(open(sys.argv[1])); assert isinstance(data,list) and data and all(isinstance(row,dict) and "resource" in row and "remaining" in row for row in data), "Unrecognized quota response"; print("PASS: authenticated quota response received; GPU not launched.")' "$RUNNER_TEMP/quota.json"
