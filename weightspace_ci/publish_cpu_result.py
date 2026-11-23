@@ -86,12 +86,25 @@ def get_json(url, token):
         return json.load(res)
 
 
+class UnauthenticatedArtifactRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward a GitHub bearer token to a signed artifact storage URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise ValueError("Unsafe artifact redirect")
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            redirected.remove_header("Authorization")
+        return redirected
+
+
 def get_zip(url, token):
     req = urllib.request.Request(
         url, headers={"Authorization": "Bearer " + token,
                       "Accept": "application/vnd.github+json",
                       "User-Agent": "wsp-cpu-evidence-publisher"})
-    with urllib.request.urlopen(req, timeout=30) as res:
+    opener = urllib.request.build_opener(UnauthenticatedArtifactRedirect())
+    with opener.open(req, timeout=30) as res:
         blob = res.read(MAX_ZIP + 1)
     if len(blob) > MAX_ZIP:
         raise ValueError("Oversized evidence download")
