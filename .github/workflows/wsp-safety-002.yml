@@ -1,0 +1,47 @@
+name: WSP safety-constrained rank-2 CPU study
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/wsp-safety-002.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsp-cpu-safety-002
+  cancel-in-progress: false
+
+jobs:
+  research:
+    if: github.repository == 'xxammaxx/mindloop-weightspace-lab' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU-only frozen Qwen dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu 'torch==2.9.1'
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'numpy==2.2.6' 'transformers==5.12.0'
+      - name: Validate independent splits and mathematical safety gates
+        run: python -m unittest discover -s weightspace_ci/tests -v
+      - name: Execute preregistered safety-target rank-2 comparison on new holdout
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
+        run: python -m weightspace_ci.safety_exploratory
+      - name: Retain measured aggregate-only result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsp-safety-002-${{ github.run_id }}
+          path: cpu-results/safety-002.json
+          if-no-files-found: warn
+          retention-days: 30
