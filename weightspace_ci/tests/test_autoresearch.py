@@ -49,6 +49,8 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertIn("python -m weightspace_ci.autoresearch run", workflow)
         self.assertIn("python -m weightspace_ci.autoresearch verify", workflow)
         self.assertIn("git push origin HEAD:main", workflow)
+        self.assertIn("git ls-files --others --exclude-standard results/auto/", workflow)
+        self.assertIn("Autonomous research blocked; inspect committed blocker", workflow)
         self.assertIn('git clean -f -- "results/auto/round-${ROUND}.json"', workflow)
         self.assertIn("python -m weightspace_ci.autoresearch block", workflow)
         self.assertIn("contents: write", workflow)
