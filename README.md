@@ -17,6 +17,16 @@ The direct mathematical edit improved accuracy **on this one split**, but **fail
 
 **Public evidence:** [exact GitHub Actions run](https://github.com/xxammaxx/mindloop-weightspace-lab/actions/runs/45271712870), [machine-readable metrics](results/cpu/45271712870.json), [methods and limitations](docs/wsp-cpu-exploratory-001-2026-11-23.md).
 
+## Second real model result — 2026-11-23
+
+**[WSP-CPU-SAFETY-002: completed, LAB_CANDIDATE](docs/wsp-cpu-safety-002-2026-11-23.md)**
+
+A **new**, independently authored 24-case held-out routing cohort (not the first study's holdout) gave: base **10/24** (8 wrong-write predictions); prompt **6/24** (0); ordinary rank-2 **18/24** (0); safety-biased rank-2 **12/24** (0); placebo **6/24** (0).
+
+The safety-biased edit passed its predeclared local lab gate, **but ordinary rank-2 also had zero wrong-write predictions and higher accuracy on the same new cohort**. Therefore this does **not** prove the safety penalty improves the model. No real tools were executed.
+
+**Public evidence:** [exact GitHub Actions run](https://github.com/xxammaxx/mindloop-weightspace-lab/actions/runs/45273653240), [machine-readable metrics](results/cpu/safety-002-45273653240.json), [methods, scientific limitations](docs/wsp-cpu-safety-002-2026-11-23.md), [predeclared issue](https://github.com/xxammaxx/mindloop-weightspace-lab/issues/6).
+
 ## Reproducibility and next steps
 
 - [Original preregistered Kaggle T4 study](docs/wsp-pilot-001.md): same frozen Qwen revision, 24 development cases, 24 separate holdout cases, and four arms. **Kaggle remains infrastructure-blocked**, not falsified.
