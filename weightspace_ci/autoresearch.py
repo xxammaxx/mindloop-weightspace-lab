@@ -156,12 +156,13 @@ def frozen_digest(number):
     return hashlib.sha256(serialized).hexdigest()
 
 
-def result_path(number, directory=OUT_DIR):
-    return Path(directory) / ("round-%03d.json" % number)
+def result_path(number, directory=None):
+    # Resolve at call time so isolated tests cannot pollute the checkout.
+    return Path(OUT_DIR if directory is None else directory) / ("round-%03d.json" % number)
 
 
-def blocked_path(number, directory=OUT_DIR):
-    return Path(directory) / ("blocked-%03d.json" % number)
+def blocked_path(number, directory=None):
+    return Path(OUT_DIR if directory is None else directory) / ("blocked-%03d.json" % number)
 
 
 def _integer(value, minimum, maximum):
@@ -238,9 +239,9 @@ def validate_evidence(report, number, expected_run=None, expected_sha=None):
     return report
 
 
-def next_round(directory=OUT_DIR):
+def next_round(directory=None):
     """Resume from verified immutable ledger; never skip a blocked experiment."""
-    directory = Path(directory)
+    directory = Path(OUT_DIR if directory is None else directory)
     for num, _, _ in CATALOG:
         blocked = blocked_path(num, directory)
         existing = result_path(num, directory)

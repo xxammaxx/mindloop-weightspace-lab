@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/wsp-autoresearch.yml'
+      - 'weightspace_ci/autoresearch.py'
+      - 'weightspace_ci/cpu_model.py'
+      - 'weightspace_ci/tests/test_autoresearch.py'
   schedule:
     # Two fixed research opportunities per day; schedule timing is best effort.
     - cron: '47 4,16 * * *'
@@ -36,6 +39,12 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --only-binary=:all: 'numpy==2.2.6'
           python -m unittest discover -s weightspace_ci/tests -v
+          # Regression gate: test fixtures must never add fake unpublished ledgers.
+          leaked="$(git ls-files --others --exclude-standard results/auto/)"
+          if [ -n "$leaked" ]; then
+            echo "::error::Tests polluted the autonomous ledger checkout."
+            exit 1
+          fi
 
       - name: Select exactly one preregistered uncompleted experiment
         id: plan
@@ -49,6 +58,11 @@ jobs:
         run: |
           echo "WSP_RESEARCH_QUEUE=$CYCLE_STATE"
           echo "No model download, no GPU, no Kaggle API, no repeat attempt."
+          if [ "$CYCLE_STATE" = 'BLOCKED_INFRA' ]; then
+            echo "::error::Autonomous research blocked; inspect committed blocker before retrying."
+            exit 1
+          fi
+          test "$CYCLE_STATE" = 'CATALOG_EXHAUSTED'
 
       - name: Install frozen Qwen CPU-only inference runtime
         if: steps.plan.outputs.status == 'READY'
