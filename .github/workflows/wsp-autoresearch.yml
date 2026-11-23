@@ -105,6 +105,8 @@ jobs:
           # recorded separately and blocks the next schedule.
           git fetch origin main
           git reset --hard FETCH_HEAD
+          # Remove ONLY a local unpublished result. Never clean other workspaces.
+          git clean -f -- "results/auto/round-${ROUND}.json"
           python -m weightspace_ci.autoresearch block "$ROUND"
           marker="results/auto/blocked-${ROUND}.json"
           git add -- "$marker"
