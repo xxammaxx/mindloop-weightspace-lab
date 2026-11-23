@@ -1,0 +1,117 @@
+name: WSP autonomous bounded CPU research
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/wsp-autoresearch.yml'
+  schedule:
+    # Two fixed research opportunities per day; schedule timing is best effort.
+    - cron: '47 4,16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wsp-autoresearch-main-ledger
+  cancel-in-progress: false
+
+jobs:
+  research-cycle:
+    if: github.repository == 'xxammaxx/mindloop-weightspace-lab' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify full regression suite before scheduling any model run
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'numpy==2.2.6'
+          python -m unittest discover -s weightspace_ci/tests -v
+
+      - name: Select exactly one preregistered uncompleted experiment
+        id: plan
+        run: |
+          python -m weightspace_ci.autoresearch plan | tee -a "$GITHUB_OUTPUT"
+
+      - name: Publish queue state on no-op runs
+        if: steps.plan.outputs.status != 'READY'
+        env:
+          CYCLE_STATE: ${{ steps.plan.outputs.status }}
+        run: |
+          echo "WSP_RESEARCH_QUEUE=$CYCLE_STATE"
+          echo "No model download, no GPU, no Kaggle API, no repeat attempt."
+
+      - name: Install frozen Qwen CPU-only inference runtime
+        if: steps.plan.outputs.status == 'READY'
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu 'torch==2.9.1'
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'transformers==5.12.0'
+
+      - name: Execute one fresh-holdout rank-2 experiment
+        if: steps.plan.outputs.status == 'READY'
+        env:
+          ROUND: ${{ steps.plan.outputs.round }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
+        run: |
+          python -m weightspace_ci.autoresearch run "$ROUND"
+
+      - name: Independently revalidate exact result and publish to main
+        if: steps.plan.outputs.status == 'READY'
+        env:
+          ROUND: ${{ steps.plan.outputs.round }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m weightspace_ci.autoresearch verify "$ROUND"
+          file="results/auto/round-${ROUND}.json"
+          test -s "$file"
+          git add -- "$file"
+          test "$(git diff --cached --name-only)" = "$file"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "research(wsp): publish verified autonomous round ${ROUND} (${GITHUB_RUN_ID})"
+          # A bounded, safe integration of concurrent README or documentation edits.
+          git fetch origin main
+          git rebase FETCH_HEAD
+          git push origin HEAD:main
+
+      - name: Retain machine-readable evidence independently of git publication
+        if: always() && steps.plan.outputs.status == 'READY'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsp-autonomous-${{ github.run_id }}
+          path: results/auto/round-${{ steps.plan.outputs.round }}.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Record infrastructure failure without leaked diagnostics or blind retries
+        if: failure() && steps.plan.outputs.status == 'READY'
+        env:
+          ROUND: ${{ steps.plan.outputs.round }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Abort a partially prepared result commit; the failed attempt is
+          # recorded separately and blocks the next schedule.
+          git fetch origin main
+          git reset --hard FETCH_HEAD
+          # Remove ONLY a local unpublished result. Never clean other workspaces.
+          git clean -f -- "results/auto/round-${ROUND}.json"
+          python -m weightspace_ci.autoresearch block "$ROUND"
+          marker="results/auto/blocked-${ROUND}.json"
+          git add -- "$marker"
+          test "$(git diff --cached --name-only)" = "$marker"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "research(wsp): block failed autonomous round ${ROUND} (${GITHUB_RUN_ID})"
+          git push origin HEAD:main
