@@ -1,5 +1,7 @@
 import hashlib
 import json
+import subprocess
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,6 +43,52 @@ class OfflineTests(unittest.TestCase):
         self.assertFalse(dispatch.private_dataset_created('Dataset creation error: rejected','user/data'))
         self.assertFalse(dispatch.private_dataset_created('Your public Dataset is being created. Please check progress at https://www.kaggle.com/datasets/user/data','user/data'))
         self.assertFalse(dispatch.private_dataset_created('Your private Dataset is being created. Please check progress at https://www.kaggle.com/datasets/other/data','user/data'))
+
+    def test_private_dataset_creation_keeps_cli_success_receipt(self):
+        args = dispatch.dataset_create_args('/tmp/offline-bundle')
+        self.assertEqual(args, ('datasets', 'create', '-p', '/tmp/offline-bundle', '--keep-tabular'))
+        self.assertNotIn('--public', args)
+        self.assertNotIn('--quiet', args)
+        self.assertNotIn('--silent', args)
+
+    def test_cli_failure_categories_are_allowlisted_and_do_not_leak_secrets(self):
+        cases = [
+            ('403 Forbidden token=not-for-public', 'ACCESS_DENIED'),
+            ('401 Unauthorized key=not-for-public', 'AUTH_REJECTED'),
+            ('400 Bad Request: invalid dataset-metadata.json', 'DATASET_METADATA'),
+            ('409 Conflict: dataset already exists', 'ALREADY_EXISTS'),
+            ('413 Request Entity Too Large: file too large', 'INPUT_TOO_LARGE'),
+            ('429 Too Many Requests, quota exceeded', 'QUOTA_LIMIT'),
+            ('Temporary failure in name resolution', 'NETWORK_DNS'),
+            ('503 Service Unavailable', 'SERVER_ERROR'),
+            ('unrecognized private-account-secret', 'UNKNOWN'),
+        ]
+        for raw, expected in cases:
+            with self.subTest(expected=expected):
+                with patch('weightspace_ci.dispatch.subprocess.run') as run:
+                    run.return_value = subprocess.CompletedProcess(
+                        args=['kaggle'], returncode=1, stdout='secret-username=not-for-public',
+                        stderr=raw)
+                    with self.assertRaises(RuntimeError) as error:
+                        dispatch.run_cli('datasets', 'create', '-p', '/tmp/private')
+                message = str(error.exception)
+                self.assertIn('Kaggle CLI command failed: datasets/create', message)
+                self.assertIn(expected, message)
+                self.assertNotIn('not-for-public', message)
+                self.assertNotIn('secret-username', message)
+                self.assertNotIn('unrecognized private-account-secret', message)
+                self.assertNotIn('/tmp/private', message)
+                self.assertEqual(run.call_args.kwargs['capture_output'], True)
+                self.assertEqual(run.call_args.kwargs['text'], True)
+
+    def test_cli_success_result_not_suppressed(self):
+        receipt = 'Your private Dataset is being created. Please check progress at https://www.kaggle.com/datasets/example/wsp-offline-42'
+        with patch('weightspace_ci.dispatch.subprocess.run') as run:
+            run.return_value = subprocess.CompletedProcess(args=['kaggle'], returncode=0,
+                                                           stdout=receipt, stderr='')
+            value = dispatch.run_cli(*dispatch.dataset_create_args('/tmp/bundle'))
+        self.assertEqual(value, receipt)
+        self.assertTrue(dispatch.private_dataset_created(value, 'example/wsp-offline-42'))
 
     def test_qualification_requires_exact_identity(self):
         data = {'schema':1,'experiment':'WSP-PILOT-001','run_id':'42','source_sha':'a'*40,
