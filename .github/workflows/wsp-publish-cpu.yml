@@ -1,0 +1,54 @@
+name: Publish verified WSP CPU scientific evidence
+
+on:
+  workflow_run:
+    workflows: ['WSP Qwen rank-2 CPU exploratory research']
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-wsp-cpu-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'xxammaxx/mindloop-weightspace-lab' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Run validation and anti-tampering regression tests
+        run: |
+          python3 -m pip install --disable-pip-version-check 'numpy==2.2.6'
+          python3 -m unittest discover -s weightspace_ci/tests -v
+      - name: Verify exactly matched public CPU results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: python3 -m weightspace_ci.publish_cpu_result
+      - name: Publish aggregate-only verified result
+        env:
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          path="results/cpu/${SOURCE_RUN_ID}.json"
+          test -f "$path"
+          git add -- "$path"
+          test "$(git diff --cached --name-only)" = "$path"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "research(wsp): publish verified CPU metrics from ${SOURCE_RUN_ID}"
+          git push origin HEAD:main
