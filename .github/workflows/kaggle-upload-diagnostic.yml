@@ -1,0 +1,37 @@
+name: WSP Kaggle dataset transport diagnosis (no GPU)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kaggle-upload-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsp-kaggle-private-upload-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.repository == 'xxammaxx/mindloop-weightspace-lab' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    environment: KAGGLE_API_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Kaggle CLI and run regression suite
+        run: |
+          python3 -m venv "$RUNNER_TEMP/kaggle-cli"
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m pip install --disable-pip-version-check 'kaggle==2.2.5' 'six==1.17.0' 'numpy==2.2.6'
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m unittest discover -s weightspace_ci/tests -v
+      - name: Diagnose previous private dataset and at most one synthetic upload
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          export PATH="$RUNNER_TEMP/kaggle-cli/bin:$PATH"
+          "$RUNNER_TEMP/kaggle-cli/bin/python" -m weightspace_ci.diagnose_dataset
