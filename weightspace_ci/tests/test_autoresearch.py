@@ -38,6 +38,23 @@ class AutonomousResearchTests(unittest.TestCase):
             hashes.add(auto.frozen_digest(number))
         self.assertEqual(len(hashes), len(auto.CATALOG))
 
+    def test_workflow_schedule_and_failure_recovery_are_wired(self):
+        from pathlib import Path
+        workflow = Path(".github/workflows/wsp-autoresearch.yml").read_text()
+        self.assertIn("cron: '47 4,16 * * *'", workflow)
+        self.assertIn("branches: [main]", workflow)
+        self.assertIn("group: wsp-autoresearch-main-ledger", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("python -m weightspace_ci.autoresearch plan", workflow)
+        self.assertIn("python -m weightspace_ci.autoresearch run", workflow)
+        self.assertIn("python -m weightspace_ci.autoresearch verify", workflow)
+        self.assertIn("git push origin HEAD:main", workflow)
+        self.assertIn('git clean -f -- "results/auto/round-${ROUND}.json"', workflow)
+        self.assertIn("python -m weightspace_ci.autoresearch block", workflow)
+        self.assertIn("contents: write", workflow)
+        self.assertNotIn("KAGGLE_API_TOKEN", workflow)
+        self.assertNotIn("torch.cuda", workflow)
+
     def test_target_rank_two_with_only_dev_synthetic_observations(self):
         dev, holdout = auto.cohort(3)
         hidden = np.eye(24)
