@@ -1,0 +1,47 @@
+name: WSP Qwen rank-2 CPU exploratory research
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/wsp-cpu-exploratory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsp-qwen-cpu-exploratory
+  cancel-in-progress: false
+
+jobs:
+  exploratory:
+    if: github.repository == 'xxammaxx/mindloop-weightspace-lab' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU-only PyTorch and pinned model dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu 'torch==2.9.1'
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'numpy==2.2.6' 'transformers==5.12.0'
+      - name: Verify host algebra and safety gates
+        run: python -m unittest discover -s weightspace_ci/tests -v
+      - name: Execute the four-arm rank-2 experiment on the public CPU runner
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
+        run: python -m weightspace_ci.cpu_exploratory
+      - name: Publish aggregate results, if complete
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsp-cpu-exploratory-${{ github.run_id }}
+          path: cpu-results/metrics.json
+          if-no-files-found: warn
+          retention-days: 30
