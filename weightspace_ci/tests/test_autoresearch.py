@@ -198,6 +198,24 @@ class AutonomousResearchTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     auto.trusted_context()
 
+    def test_output_directory_override_does_not_create_repo_fake_blocker(self):
+        # Regression for live run #45277339225: old default arguments
+        # captured OUT_DIR at import time, so fixture wrote blocked-003.json
+        # into the checkout and the subsequent real plan skipped model inference.
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(auto, "OUT_DIR", Path(folder)):
+                self.assertEqual(auto.result_path(3), Path(folder) / "round-003.json")
+                self.assertEqual(auto.blocked_path(3), Path(folder) / "blocked-003.json")
+                self.assertEqual(auto.next_round(), (3, "READY"))
+                context = {"GITHUB_REPOSITORY": "xxammaxx/mindloop-weightspace-lab",
+                           "GITHUB_REF": "refs/heads/main",
+                           "GITHUB_RUN_ATTEMPT": "1",
+                           "GITHUB_RUN_ID": "456", "GITHUB_SHA": "a"*40}
+                with patch.dict("os.environ", context, clear=True):
+                    auto.block(3)
+                self.assertTrue((Path(folder) / "blocked-003.json").is_file())
+                self.assertEqual(auto.next_round(), (None, "BLOCKED_INFRA"))
+
     def test_failure_marker_is_no_secret_and_deduplicated(self):
         with tempfile.TemporaryDirectory() as folder:
             original = auto.OUT_DIR
