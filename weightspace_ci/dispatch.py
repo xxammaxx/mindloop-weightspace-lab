@@ -59,12 +59,40 @@ def validate_metrics(data, run_id, source_sha, bundle_sha=None):
     return data
 
 
+def classify_cli_failure(raw):
+    """Return only allowlisted failure categories, never authenticated CLI output."""
+    signatures = {
+        'AUTH_REJECTED': r'\b401\b|unauthori[sz]ed|invalid (?:api )?token|authentication required',
+        'ACCESS_DENIED': r'\b403\b|forbidden|permission denied',
+        'BAD_REQUEST': r'\b400\b|bad request|validation error|invalid (?:request|argument)',
+        'NOT_FOUND': r'\b404\b|not found',
+        'ALREADY_EXISTS': r'\b409\b|already exists|duplicate dataset|conflict',
+        'INPUT_TOO_LARGE': r'\b413\b|payload too large|request entity too large|file too large',
+        'QUOTA_LIMIT': r'\b429\b|rate limit|quota exceeded|storage limit|too many requests',
+        'SERVER_ERROR': r'\b50[0-9]\b|internal server error|service unavailable|bad gateway',
+        'NETWORK_DNS': r'NameResolutionError|Temporary failure in name resolution|Name or service not known',
+        'NETWORK': r'ConnectionError|Connection refused|Network is unreachable|Max retries exceeded|SSLError',
+        'TIMEOUT': r'TimeoutExpired|ReadTimeout|ConnectTimeout|timed out',
+        'DATASET_METADATA': r'dataset-metadata\.json|invalid metadata|invalid license|dataset title',
+        'UPLOAD_ERROR': r'upload failed|failed to upload|upload error',
+    }
+    matches = sorted(name for name, pattern in signatures.items() if re.search(pattern, raw, re.I))
+    return matches or ['UNKNOWN']
+
+
+def dataset_create_args(root):
+    """Private by default. Do not suppress the success receipt needed for verification."""
+    return ('datasets', 'create', '-p', str(root), '--keep-tabular')
+
+
 def run_cli(*args, timeout=120):
     r = subprocess.run(['kaggle', *args], capture_output=True, text=True, timeout=timeout,
                        env={k:v for k,v in os.environ.items() if k!='GH_TOKEN'})
     if r.returncode:
-        # Never publish output from an authenticated command.
-        raise RuntimeError('Kaggle CLI command failed: ' + '/'.join(args[:2]))
+        # Only disclose allowlisted categories; Kaggle may return account data or tokens.
+        categories = classify_cli_failure((r.stderr or '') + '\n' + (r.stdout or ''))
+        raise RuntimeError('Kaggle CLI command failed: ' + '/'.join(args[:2]) +
+                           '; diagnosis=' + ','.join(categories))
     return r.stdout
 
 
@@ -167,7 +195,7 @@ def create_dataset(root, owner, run_id, digest):
                 'description':'Private offline reproducibility input. Qwen model: Apache-2.0, included LICENSE; Python wheels retain individual upstream license files. Exact upstream revision and all file hashes are in repository and manifest.'}
     (root/'dataset-metadata.json').write_text(json.dumps(metadata))
     try:
-        result = run_cli('datasets','create','-p',str(root),'--keep-tabular','--quiet',timeout=900)
+        result = run_cli(*dataset_create_args(root), timeout=900)
     finally:
         (root/'dataset-metadata.json').unlink()
     if not private_dataset_created(result,ref):
