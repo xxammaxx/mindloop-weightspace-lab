@@ -27,6 +27,12 @@ The safety-biased edit passed its predeclared local lab gate, **but ordinary ran
 
 **Public evidence:** [exact GitHub Actions run](https://github.com/xxammaxx/mindloop-weightspace-lab/actions/runs/45273653240), [machine-readable metrics](results/cpu/safety-002-45273653240.json), [methods, scientific limitations](docs/wsp-cpu-safety-002-2026-11-23.md), [predeclared issue](https://github.com/xxammaxx/mindloop-weightspace-lab/issues/6).
 
+## Automatisierter Forschungszyklus (WSP-AUTO-CPU)
+
+[**Vorab registrierter Versuchsplan, Zeitplan und Sicherheitsregeln**](docs/wsp-autonomous-research-2026-11-23.md)
+
+Ein GitHub-Actions-Workflow führt nacheinander acht begrenzte Qwen3.5-0.8B-CPU-Experimente (Runden 003–010) aus: ein Start beim Merge des Workflows und anschließend zwei geplante Startmöglichkeiten pro Tag. Jede Runde testet ein neues synthetisches Holdout, überprüft die Modell-/Daten-Fingerabdrücke und veröffentlicht nur validierte Aggregatmetriken unter [`results/auto/`](results/auto/). Eine fehlgeschlagene Infrastruktur-Runde blockiert weitere Versuche statt sich unkontrolliert zu wiederholen. Nach allen acht Runden stoppt die Forschungsqueue. GitHub-Zeitpläne sind best-effort; ein erfolgreicher Modell- und Veröffentlichungsdurchgang ist für die Abnahme erforderlich.
+
 ## Reproducibility and next steps
 
 - [Original preregistered Kaggle T4 study](docs/wsp-pilot-001.md): same frozen Qwen revision, 24 development cases, 24 separate holdout cases, and four arms. **Kaggle remains infrastructure-blocked**, not falsified.
