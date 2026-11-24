@@ -2,6 +2,11 @@ name: CPU bootstrap tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'weightspace_ci/**'
+      - '.github/workflows/cpu-bootstrap.yml'
+      - '.github/workflows/wsp-autoresearch.yml'
   push:
     paths:
       - 'weightspace_ci/**'
@@ -24,3 +29,15 @@ jobs:
           persist-credentials: false
       - run: python3 -m pip install 'numpy==2.2.6'
       - run: python3 -m unittest discover -s weightspace_ci/tests -v
+
+      - name: Check bounded integration wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('.github/workflows/wsp-autoresearch.yml').read_text()
+          assert 'mindloop_cycle:' in s and 'inputs.mindloop_cycle' in s
+          assert 'MINDLOOP_RING_MANAGED' in s
+          assert 'weightspace_ci.autoresearch verify' in s
+          assert 'wsp-autonomous-' in s
+          assert 'MINDLOOP_RING_TOKEN' not in s
+          PY
